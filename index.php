@@ -12,10 +12,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 require_once 'db.php';
 
 $method = $_SERVER['REQUEST_METHOD'];
-$path   = trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/');
-$parts  = explode('/', $path);
+$uri    = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+$parts  = explode('/', trim($uri, '/'));
 
-// Rutas: /products  /products/{id}
 $resource = $parts[0] ?? '';
 $id       = isset($parts[1]) && is_numeric($parts[1]) ? (int)$parts[1] : null;
 
@@ -25,20 +24,17 @@ if ($resource !== 'products') {
     exit;
 }
 
-$body = json_decode(file_get_contents('php://input'), true);
+$body = json_decode(file_get_contents('php://input'), true) ?? [];
 
 switch ($method) {
 
-    // GET /products          → todos los productos
-    // GET /products?q=nombre → búsqueda por nombre
-    // GET /products/{id}     → uno por id
     case 'GET':
         if ($id !== null) {
             $stmt = $pdo->prepare('SELECT * FROM products WHERE id = ?');
             $stmt->execute([$id]);
-            $product = $stmt->fetch(PDO::FETCH_ASSOC);
-            if ($product) {
-                echo json_encode($product);
+            $row = $stmt->fetch();
+            if ($row) {
+                echo json_encode($row);
             } else {
                 http_response_code(404);
                 echo json_encode(['error' => 'Producto no encontrado']);
@@ -51,11 +47,10 @@ switch ($method) {
             } else {
                 $stmt = $pdo->query('SELECT * FROM products ORDER BY name');
             }
-            echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
+            echo json_encode($stmt->fetchAll());
         }
         break;
 
-    // POST /products  → crear producto
     case 'POST':
         $name    = trim($body['name']    ?? '');
         $barcode = trim($body['barcode'] ?? '');
@@ -72,44 +67,32 @@ switch ($method) {
             'INSERT INTO products (name, barcode, price, stock) VALUES (?, ?, ?, ?)'
         );
         $stmt->execute([$name, $barcode, $price, $stock]);
-        $newId = $pdo->lastInsertId();
-
         http_response_code(201);
-        echo json_encode(['id' => $newId, 'name' => $name, 'barcode' => $barcode, 'price' => $price, 'stock' => $stock]);
+        echo json_encode([
+            'id' => (int)$pdo->lastInsertId(),
+            'name' => $name, 'barcode' => $barcode,
+            'price' => $price, 'stock' => $stock
+        ]);
         break;
 
-    // PUT /products/{id}  → actualizar producto
     case 'PUT':
-        if ($id === null) {
-            http_response_code(400);
-            echo json_encode(['error' => 'ID requerido']);
-            break;
-        }
+        if ($id === null) { http_response_code(400); echo json_encode(['error' => 'ID requerido']); break; }
 
         $name    = trim($body['name']    ?? '');
         $barcode = trim($body['barcode'] ?? '');
         $price   = (float)($body['price'] ?? 0);
         $stock   = (int)($body['stock']   ?? 0);
 
-        $stmt = $pdo->prepare(
-            'UPDATE products SET name=?, barcode=?, price=?, stock=? WHERE id=?'
-        );
-        $stmt->execute([$name, $barcode, $price, $stock, $id]);
+        $pdo->prepare('UPDATE products SET name=?, barcode=?, price=?, stock=? WHERE id=?')
+            ->execute([$name, $barcode, $price, $stock, $id]);
 
         echo json_encode(['message' => 'Producto actualizado']);
         break;
 
-    // DELETE /products/{id}
     case 'DELETE':
-        if ($id === null) {
-            http_response_code(400);
-            echo json_encode(['error' => 'ID requerido']);
-            break;
-        }
+        if ($id === null) { http_response_code(400); echo json_encode(['error' => 'ID requerido']); break; }
 
-        $stmt = $pdo->prepare('DELETE FROM products WHERE id=?');
-        $stmt->execute([$id]);
-
+        $pdo->prepare('DELETE FROM products WHERE id=?')->execute([$id]);
         echo json_encode(['message' => 'Producto eliminado']);
         break;
 
